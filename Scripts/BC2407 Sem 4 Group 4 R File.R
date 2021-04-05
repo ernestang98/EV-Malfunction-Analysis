@@ -1,0 +1,748 @@
+---
+  title: "2407 R Script"
+output: html_notebook
+---
+  
+  Importing relevant libraries
+```{r}
+library(data.table)
+library(mltools)
+library(DMwR)
+library(plyr)
+library(dplyr)
+library(caTools)
+library(caret)
+library(e1071)
+library(corrplot)
+library("arules")
+library(nnet)
+library(randomForest)
+library(Boruta)
+#install.packages("scales")
+library(plotly)
+#install.packages('arulesViz')
+set.seed(1000)
+```
+
+Importing dataset for initial preparation
+```{r}
+clamp <- fread("ClaMP_Raw-5184.csv")
+clamp <- lapply(clamp,  as.numeric)
+clamp <- data.frame(clamp)
+str(clamp)
+```
+
+Remove empty columns
+```{r}
+clamp$e_res <- NULL
+clamp$e_res2 <- NULL
+clamp$e_magic <- NULL
+clamp$e_crlc <- NULL
+
+row.has.na <- apply(clamp, 1, function(x){any(is.na(x))})
+row.with.na <- clamp[row.has.na,]
+
+str(clamp)
+```
+Based on the structure observed, we add and rename columns to make dataset more relevant for Tesla
+```{r}
+# Rename columns
+colnames(clamp)[which(names(clamp) == "ImageBase")] <- "ChargeCycles"
+colnames(clamp)[which(names(clamp) == "SizeOfImage")] <- "CarMileage"
+colnames(clamp)[which(names(clamp) == "CreationYear")] <- "YearObtained"
+colnames(clamp)[which(names(clamp) == "MajorSubsystemVersion")] <- "SoftwareVersion"
+colnames(clamp)[which(names(clamp) == "MinorSubsystemVersion")] <- "OSVersion"
+colnames(clamp)[which(names(clamp) == "Machine")] <- "Models"
+colnames(clamp)[which(names(clamp) == "class")] <- "MalwareDetection"
+
+# Adding in new column
+teslacountries <- fread("TeslaCountries.csv")
+clamp <- clamp %>% left_join(teslacountries, by = c("e_lfanew" = "CountryID"))
+clamp$e_lfanew <- NULL
+#clamp$Country <- as.factor(clamp$Country)
+```
+
+Converting to numeric columns
+```{r}
+clamp_num_names <- c("NumberOfSections", "NumberOfSymbols", "SizeOfOptionalHeader", "ChargeCycles",  "SizeOfInitializedData", "SizeOfUninitializedData", "AddressOfEntryPoint", "BaseOfCode", "BaseOfData", "SizeOfCode", "CarMileage", "SizeOfHeaders", "CheckSum", "SizeOfStackReserve", "SizeOfStackCommit", "SizeOfHeapReserve", "SizeOfHeapCommit", "NumberOfRvaAndSizes")
+clamp_num <- clamp[names(clamp) %in% clamp_num_names]
+num_names <- names(clamp_num)
+clamp_num <- lapply(clamp_num, as.numeric)
+clamp_num <- data.frame(clamp_num)
+str(clamp_num)
+```
+
+Converting the remaining to categorical columns
+```{r}
+clamp_cat <- clamp
+clamp_cat[, num_names] <- list(NULL)
+clamp_cat <- lapply(clamp_cat, factor)
+clamp_cat <- data.frame(clamp_cat)
+str(clamp_cat)
+```
+
+Rename factor values (How to hide the revalue results?)
+```{r}
+clamp_cat$Models <- revalue(clamp_cat$Models, c("332"="Model X", "448"="Model Y", '34404'= 'Model S'))
+clamp_cat$OSVersion <- revalue(clamp_cat$OSVersion, c("0"="V5", "1"="V4", '2'= 'V3', '10' = 'V2', '20' = 'V1'))
+```
+
+
+Final dataset
+```{r}
+clamp_model <- data.frame(clamp_cat, clamp_num)
+str(clamp_model)
+fwrite(clamp_model, file="TableauClampData.csv")
+names(clamp_model)
+clamp_corr <- clamp_model
+clamp_corr <- data.frame(lapply(clamp_corr, as.numeric))
+corrplot(cor(clamp_corr), type = "upper", title = "Correlation Plot for Final Dataset", mar=c(0,0,1,0),
+         tl.cex=0.5,
+         tl.col = "black")
+str(clamp_model)
+```
+
+Data visualisation
+Numerical variables: Univariate histogram analysis
+```{r}
+clamp_num1 <- clamp_model[, c("NumberOfSections", "NumberOfRvaAndSizes", "SizeOfOptionalHeader")]
+ggplot(melt(clamp_num1), aes(x = value)) + 
+  facet_wrap(~ variable, scales = "free") + 
+  geom_histogram(binwidth = 1, fill = "indianred3", colour="black")+
+  theme_minimal()+
+  labs(x = "Factors", y = "Distribution", title = "Histogram of X Factors Part 1") +
+  theme(plot.title = element_text(hjust = 0.4))
+
+clamp_num2 <- clamp_model[, c("ChargeCycles", "SizeOfInitializedData", "SizeOfUninitializedData")]
+ggplot(melt(clamp_num2), aes(x = value)) + 
+  facet_wrap(~ variable, scales = "free") + 
+  geom_histogram(binwidth = 1000000, fill = "indianred3", colour="black")+
+  theme_minimal()+
+  labs(x = "Factors", y = "Distribution", title = "Histogram of X Factors Part 2") +
+  theme(plot.title = element_text(hjust = 0.4))
+
+clamp_num3 <- clamp_model[, c("AddressOfEntryPoint", "BaseOfCode", "BaseOfData")]
+ggplot(melt(clamp_num3), aes(x = value)) + 
+  facet_wrap(~ variable, scales = "free") + 
+  geom_histogram(binwidth = 1000000, fill = "indianred3", colour="black")+
+  theme_minimal()+
+  labs(x = "Factors", y = "Distribution", title = "Histogram of X Factors Part 3") +
+  theme(plot.title = element_text(hjust = 0.4))
+
+
+clamp_num4 <- clamp_model[, c("SizeOfCode", "CarMileage", "SizeOfHeaders")]
+ggplot(melt(clamp_num4), aes(x = value)) + 
+  facet_wrap(~ variable, scales = "free") + 
+  geom_histogram(binwidth = 1000000, fill = "indianred3", colour="black")+
+  theme_minimal()+
+  labs(x = "Factors", y = "Distribution", title = "Histogram of X Factors Part 4") +
+  theme(plot.title = element_text(hjust = 0.4))
+
+clamp_num5 <- clamp_model[, c("CheckSum", "SizeOfStackReserve", "SizeOfStackCommit")]
+ggplot(melt(clamp_num5), aes(x = value)) + 
+  facet_wrap(~ variable, scales = "free") + 
+  geom_histogram(binwidth = 1000000, fill = "indianred3", colour="black")+
+  theme_minimal()+
+  labs(x = "Factors", y = "Distribution", title = "Histogram of X Factors Part 5") +
+  theme(plot.title = element_text(hjust = 0.4))
+
+clamp_num6 <- clamp_model[, c("SizeOfHeapReserve", "SizeOfHeapCommit", "NumberOfSymbols")]
+ggplot(melt(clamp_num6), aes(x = value)) + 
+  facet_wrap(~ variable, scales = "free") + 
+  geom_histogram(binwidth = 10000, fill = "indianred3", colour="black")+
+  theme_minimal()+
+  labs(x = "Factors", y = "Distribution", title = "Histogram of X Factors Part 6") +
+  theme(plot.title = element_text(hjust = 0.4))
+```
+
+Numerical variables: Univariate density analysis
+```{r}
+ggplot(melt(clamp_num1), aes(x = value)) + 
+  facet_wrap(~ variable, scales = "free", ncol=1) +
+  geom_density(fill = "indianred3")+
+  theme_minimal()+
+  labs(x = "Factors", y = "Density", title = "Density Plot of X Factors Part 1") +
+  theme(plot.title = element_text(hjust = 0.4))
+
+ggplot(melt(clamp_num2), aes(x = value)) + 
+  facet_wrap(~ variable, scales = "free", ncol=1) +
+  geom_density(fill = "indianred3")+
+  theme_minimal()+
+  labs(x = "Factors", y = "Density", title = "Density Plot of X Factors Part 2") +
+  theme(plot.title = element_text(hjust = 0.4))
+
+ggplot(melt(clamp_num3), aes(x = value)) + 
+  facet_wrap(~ variable, scales = "free", ncol=1) +
+  geom_density(fill = "indianred3")+
+  theme_minimal()+
+  labs(x = "Factors", y = "Density", title = "Density Plot of X Factors Part 3") +
+  theme(plot.title = element_text(hjust = 0.4))
+
+ggplot(melt(clamp_num4), aes(x = value)) + 
+  facet_wrap(~  variable, scales = 'free', ncol=1) +
+  geom_density(fill = "indianred3")+
+  theme_minimal()+
+  labs(x = "Factors", y = "Density", title = "Density Plot of X Factors Part 4") +
+  theme(plot.title = element_text(hjust = 0.4))
+
+ggplot(melt(clamp_num5), aes(x = value)) + 
+  facet_wrap(~  variable, scales = 'free', ncol=1) +
+  geom_density(fill = "indianred3")+
+  theme_minimal()+
+  labs(x = "Factors", y = "Density", title = "Density Plot of X Factors Part 5") +
+  theme(plot.title = element_text(hjust = 0.4))
+
+ggplot(melt(clamp_num6), aes(x = value)) + 
+  facet_wrap(~  variable, scales = 'free', ncol=1) +
+  geom_density(fill = "indianred3")+
+  theme_minimal()+
+  labs(x = "Factors", y = "Density", title = "Density Plot of X Factors Part 6") +
+  theme(plot.title = element_text(hjust = 0.4))
+```
+
+Numerical analysis: Correlation plot
+```{r}
+corrData <- copy(clamp_model)
+corrData$MalwareDetection <- as.numeric(factor(corrData$MalwareDetection, levels = c("0", "1"), exclude = NULL))
+# Correlation Matrix
+corrDataNum = corrData[, lapply(corrData, is.numeric) == TRUE ]
+corrplot(cor(corrDataNum), type = "upper", title = "Correlation Plot for Numeric Data", mar=c(0,0,1,0),
+         tl.cex=0.5,
+         tl.col = "black")
+```
+
+Categorical variables: Univariate barplot analysis
+```{r}
+ClampCat1= clamp_model[, c("e_cblp", "e_cp", "e_cparhdr","e_minalloc", "e_maxalloc")]
+ggplot(melt(ClampCat1, id.vars="e_maxalloc"), aes(y = value)) + 
+  facet_wrap(~ variable, scales = "free", ncol=2) +
+  geom_bar(fill = "indianred3", 
+           color="black")+
+  theme_minimal()+
+  theme(text = element_text(size=10))+
+  labs(x = "Factors", y = "Levels", title = "Barplot of Categorical X Factors Part 1") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ClampCat2= clamp_model[, c("e_maxalloc", "e_ss", "e_sp","e_csum", "e_ip")]
+ggplot(melt(ClampCat2, id.vars="e_ip"), aes(y = value)) + 
+  facet_wrap(~ variable, scales = "free", ncol=2) +
+  geom_bar(fill = "indianred3", 
+           color="black")+
+  theme_minimal()+
+  theme(text = element_text(size=10))+
+  labs(x = "Factors", y = "Levels", title = "Barplot of Categorical X Factors Part 2") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ClampCat3= clamp_model[, c("e_ip", "e_cs", "e_lfarlc","e_ovno", "e_oemid")]
+ggplot(melt(ClampCat3, id.vars="e_oemid"), aes(y = value)) + 
+  facet_wrap(~ variable, scales = "free", ncol=2) +
+  geom_bar(fill = "indianred3", 
+           color="black")+
+  theme_minimal()+
+  theme(text = element_text(size=10))+
+  labs(x = "Factors", y = "Levels", title = "Barplot of Categorical X Factors Part 3") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ClampCat4= clamp_model[, c("e_oemid", "e_oeminfo", "Models", "Magic", "PointerToSymbolTable")]
+ggplot(melt(ClampCat4, id.vars="PointerToSymbolTable"), aes(y = value)) + 
+  facet_wrap(~ variable, scales = "free", ncol=2) +
+  geom_bar(fill = "indianred3", 
+           color="black")+
+  theme_minimal()+
+  theme(text = element_text(size=10))+
+  labs(x = "Factors", y = "Levels", title = "Barplot of Categorical X Factors Part 4") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ClampCat5= clamp_model[, c("PointerToSymbolTable", "SectionAlignment", "FileAlignment","MajorOperatingSystemVersion", "MinorOperatingSystemVersion")]
+ggplot(melt(ClampCat5, id.vars="MinorOperatingSystemVersion"), aes(y = value)) + 
+  facet_wrap(~ variable, scales = "free", ncol=2) +
+  geom_bar(fill = "indianred3", 
+           color="black")+
+  theme_minimal()+
+  theme(text = element_text(size=10))+
+  labs(x = "Factors", y = "Levels", title = "Barplot of Categorical X Factors Part 5") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ClampCat6= clamp_model[, c("MinorOperatingSystemVersion", "SoftwareVersion", "OSVersion","Subsystem", "LoaderFlags")]
+ggplot(melt(ClampCat6, id.vars="LoaderFlags"), aes(y = value)) + 
+  facet_wrap(~ variable, scales = "free", ncol=2) +
+  geom_bar(fill = "indianred3", 
+           color="black")+
+  theme_minimal()+
+  theme(text = element_text(size=10))+
+  labs(x = "Factors", y = "Levels", title = "Barplot of Categorical X Factors Part 6") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ClampCat7= clamp_model[, c("LoaderFlags", "MalwareDetection", "Country")]
+ggplot(melt(ClampCat7, id.vars="Country"), aes(y = value)) + 
+  facet_wrap(~ variable, scales = "free", ncol=2) +
+  geom_bar(fill = "indianred3", 
+           color="black")+
+  theme_minimal()+
+  theme(text = element_text(size=10))+
+  labs(x = "Factors", y = "Levels", title = "Barplot of Categorical X Factors Part 7") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(clamp_model, aes(x = YearObtained)) + 
+  geom_bar(fill = "indianred3", colour="black", width = 0.5, position = position_dodge(width = 5)) +
+  labs(x = "Outcome", 
+       y = "Count", 
+       title = "Barplot of Year of Origination Distribution") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), plot.title = element_text(hjust = 0.5))
+
+ggplot(clamp_model, aes(x = Characteristics)) + 
+  geom_bar(fill = "indianred3", colour="black", width = 0.5, position = position_dodge(width = 5)) +
+  labs(x = "Outcome", 
+       y = "Count", 
+       title = "Barplot of Characteristics Distribution") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), plot.title = element_text(hjust = 0.5))
+
+ClampCat8= clamp_model[, c("MajorLinkerVersion", "MinorLinkerVersion", "MajorImageVersion")]
+ggplot(melt(ClampCat8, id.vars="MajorImageVersion"), aes(y = value)) + 
+  facet_wrap(~ variable, scales = "free", ncol=2) +
+  geom_bar(fill = "indianred3", 
+           color="black")+
+  theme_minimal()+
+  theme(text = element_text(size=10))+
+  labs(x = "Factors", y = "Levels", title = "Barplot of Categorical X Factors Part 8") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), plot.title = element_text(hjust = 0.5))
+
+ggplot(clamp_model, aes(x = MajorImageVersion)) + 
+  geom_bar(fill = "indianred3", colour="black", width = 0.5, position = position_dodge(width = 5)) +
+  labs(x = "Outcome", 
+       y = "Count", 
+       title = "Barplot of MajorImageVersion Distribution") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), plot.title = element_text(hjust = 0.5))
+
+ggplot(clamp_model, aes(x = MinorImageVersion)) + 
+  geom_bar(fill = "indianred3", colour="black", width = 0.5, position = position_dodge(width = 5)) +
+  labs(x = "Outcome", 
+       y = "Count", 
+       title = "Barplot of MinorImageVersion Distribution") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), plot.title = element_text(hjust = 0.5))
+
+ggplot(clamp_model, aes(x = DllCharacteristics)) + 
+  geom_bar(fill = "indianred3", colour="black", width = 0.5, position = position_dodge(width = 5)) +
+  labs(x = "Outcome", 
+       y = "Count", 
+       title = "Barplot of DllCharacteristics Distribution") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), plot.title = element_text(hjust = 0.5))
+
+ggplot(clamp_model, aes(x = Country)) + 
+  geom_bar(fill = "indianred3", colour="black", width = 0.5, position = position_dodge(width = 5)) +
+  labs(x = "Outcome", 
+       y = "Count", 
+       title = "Barplot of Country Distribution") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), plot.title = element_text(hjust = 0.5))
+```
+
+Bivariate analysis
+```{r} 
+# Malware Detection against Country (Proportion)
+plotdata <- clamp_model %>%
+  group_by(Country, MalwareDetection) %>%
+  dplyr::summarize(n = n()) %>% 
+  mutate(pct = n/sum(n),
+         lbl = scales::percent(pct))
+
+ggplot(plotdata, aes(fill=factor(plotdata$MalwareDetection), y=n, x=Country, group = Country)) + 
+  geom_bar(width = 0.5, position="fill", stat="identity")+
+  theme(axis.text.x = element_text(angle = 90, hjust=1), plot.title = element_text(hjust = 0.5))+
+  labs(x = "Country", y = "Proportion", title = "MalwareDetection by Country", fill="Malware Detected")
+
+# Malware Detection against Year (Proportion)
+plotdata1 <- clamp_model %>%
+  group_by(YearObtained, MalwareDetection) %>%
+  dplyr::summarize(n = n()) %>% 
+  mutate(pct = n/sum(n),
+         lbl = scales::percent(pct))
+
+ggplot(plotdata1, aes(fill=factor(plotdata1$MalwareDetection), y=n, x=YearObtained, group = YearObtained)) + 
+  geom_bar(width = 0.5, position="fill", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust=1), plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Year", y = "Proportion", title = "Malware Detection by Year", fill="Malware Detected")
+
+# Malware Detection by Software Version
+plotdata2 <- clamp_model %>%
+  group_by(SoftwareVersion, MalwareDetection) %>%
+  dplyr::summarize(n = n()) %>% 
+  mutate(pct = n/sum(n),
+         lbl = scales::percent(pct))
+
+ggplot(plotdata2, aes(fill=factor(plotdata2$MalwareDetection), y=n, x=SoftwareVersion, group = SoftwareVersion)) + 
+  geom_bar(width = 0.5, position="fill", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust=1), plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Software Version", y = "Proportion", title = "Malware Detection by Software Version", fill="Malware Detected")
+
+plotdata3 <- clamp_model %>%
+  group_by(OSVersion, MalwareDetection) %>%
+  dplyr::summarize(n = n()) %>% 
+  mutate(pct = n/sum(n),
+         lbl = scales::percent(pct))
+
+ggplot(plotdata3, aes(fill=factor(plotdata3$MalwareDetection), y=n, x=OSVersion, group = OSVersion)) + 
+  geom_bar(width = 0.5, position="fill", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust=1), plot.title = element_text(hjust = 0.5)) +
+  labs(x = "OS Version", y = "Proportion", title = "Malware Detection by OS Version", fill="Malware Detected")
+
+plotdata4 <- clamp_model %>%
+  group_by(Models, MalwareDetection) %>%
+  dplyr::summarize(n = n()) %>% 
+  mutate(pct = n/sum(n),
+         lbl = scales::percent(pct))
+
+ggplot(plotdata4, aes(fill=factor(plotdata4$MalwareDetection), y=n, x= Models, group = Models)) + 
+  geom_bar(width = 0.5, position="fill", stat="identity") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Tesla Models", y = "Proportion", title = "Malware Detection by Model", fill="Malware Detected")
+```
+
+SMOTE
+```{r}
+clamp_smoted <- clamp_model
+table(clamp_smoted$MalwareDetection)
+proportion <- data.frame(table(clamp_smoted$MalwareDetection))
+if (proportion$Freq[1]<proportion$Freq[2] | proportion$Freq[2]<proportion$Freq[1]){
+  clamp_smoted <- SMOTE(MalwareDetection ~., clamp_smoted, perc.over = 100, k = 5, perc.under = 200)
+}
+(table(clamp_smoted$MalwareDetection))
+```
+
+Association rules: Initial preparation
+```{r}
+# Functions used in transforming continuous to discrete data
+getBreaks <- function(column_name){
+  min_value = 0
+  max_value = max(column_name)
+  interval = (max_value-min_value)/10
+  #print(interval)
+  breaks = c(seq(min_value, max_value, by=interval))
+  breaks <- ceiling(breaks)
+  return(breaks) 
+}
+
+getLabels <- function(column_name){
+  breaks = getBreaks(column_name)
+  #print(breaks)
+  labels <- c()
+  length <- length(breaks)
+  #print(length)
+  for (x in 0:length){
+    #print(x)
+    start <- breaks[x]
+    oneStep <- x+1
+    end <- breaks[oneStep]-1
+    #print(start)
+    #print(end)
+    if (x == length){
+      end <- start
+      start <- breaks[x-1]
+      string <- paste(toString(start), toString(end), sep="-") 
+    } else{
+      string <- paste(toString(start), toString(end), sep="-") 
+    }
+    #print(string)
+    labels[x] <- string
+  }
+  #print(labels)
+  deleted <- length - 1
+  labels <- labels[-deleted]
+  return(labels)
+} 
+
+#Splitting the continuous columns into intervals to make them discrete by step
+clamp_trans <- clamp_model
+
+clamp_nums <- unlist(lapply(clamp_trans, is.numeric))
+clamp_nums <- clamp_trans[ , clamp_nums]
+names(clamp_nums)
+
+clamp_nums$NumberOfSymbols <- cut(clamp_nums$NumberOfSymbols,
+                                  breaks = getBreaks(clamp_nums$NumberOfSymbols),
+                                  labels = getLabels(clamp_nums$NumberOfSymbols),
+                                  right = FALSE)
+clamp_nums$SizeOfStackReserve <- cut(clamp_nums$SizeOfStackReserve,
+                                     breaks = getBreaks(clamp_nums$SizeOfStackReserve),
+                                     labels = getLabels(clamp_nums$SizeOfStackReserve),
+                                     right = FALSE)
+clamp_nums$SizeOfInitializedData <- cut(clamp_nums$SizeOfInitializedData,
+                                        breaks = getBreaks(clamp_nums$SizeOfInitializedData),
+                                        labels = getLabels(clamp_nums$SizeOfInitializedData),
+                                        right = FALSE)
+clamp_nums$SizeOfStackCommit <- cut(clamp_nums$SizeOfStackCommit,
+                                    breaks = getBreaks(clamp_nums$SizeOfStackCommit),
+                                    labels = getLabels(clamp_nums$SizeOfStackCommit),
+                                    right = FALSE)
+clamp_nums$AddressOfEntryPoint <- cut(clamp_nums$AddressOfEntryPoint,
+                                      breaks = getBreaks(clamp_nums$AddressOfEntryPoint),
+                                      labels = getLabels(clamp_nums$AddressOfEntryPoint),
+                                      right = FALSE)
+clamp_nums$BaseOfCode <- cut(clamp_nums$BaseOfCode,
+                             breaks = getBreaks(clamp_nums$BaseOfCode),
+                             labels = getLabels(clamp_nums$BaseOfCode),
+                             right = FALSE)
+clamp_nums$BaseOfData <- cut(clamp_nums$BaseOfData,
+                             breaks = getBreaks(clamp_nums$BaseOfData),
+                             labels = getLabels(clamp_nums$BaseOfData),
+                             right = FALSE)
+clamp_nums$ChargeCycles <- cut(clamp_nums$ChargeCycles,
+                               breaks = getBreaks(clamp_nums$ChargeCycles),
+                               labels = getLabels(clamp_nums$ChargeCycles),
+                               right = FALSE)
+clamp_nums$SizeOfHeapReserve <- cut(clamp_nums$SizeOfHeapReserve,
+                                    breaks = getBreaks(clamp_nums$SizeOfHeapReserve),
+                                    labels = getLabels(clamp_nums$SizeOfHeapReserve),
+                                    right = FALSE)
+clamp_nums$SizeOfHeapCommit <- cut(clamp_nums$SizeOfHeapCommit,
+                                   breaks = getBreaks(clamp_nums$SizeOfHeapCommit),
+                                   labels = getLabels(clamp_nums$SizeOfHeapCommit),
+                                   right = FALSE)
+clamp_nums$CarMileage <- cut(clamp_nums$CarMileage,
+                             breaks = getBreaks(clamp_nums$CarMileage),
+                             labels = getLabels(clamp_nums$CarMileage),
+                             right = FALSE)
+
+clamp_nums_name <- names(clamp_nums)
+clamp_trans[, clamp_nums_name] <- list(NULL)
+clamp_trans <- data.frame(clamp_trans, clamp_nums)
+
+# Converting to transactional data
+for(i in 1:ncol(clamp_trans)) clamp_trans[[i]] <- as.factor(clamp_trans[[i]])
+trans <- as(clamp_trans, "transactions")
+```
+
+Association rules
+```{r}
+rules <- apriori(data=trans, parameter=list(supp=0.45,conf = 0.85), appearance = list (default = "lhs", rhs="MalwareDetection=1"))
+inspect(head(rules))
+rules_dataframe <- as(rules, 'data.frame')
+rules_no <- apriori(data=trans, parameter=list(supp=0.40,conf = 0.6), appearance = list (default = "lhs", rhs="MalwareDetection=0"))
+inspect(head(rules_no))
+rules_dataframe_no <- as(rules_no, 'data.frame')
+```
+
+Arules visualisation
+```{r}
+library(arulesViz)
+plot(rules, method='two-key plot')
+#plot(rules, method='two-key plot', engine='interactive')
+plot(rules, method = "paracoord")
+plot(rules_no, method='two-key plot')
+```
+
+Normalising data for Neural Networks
+```{r}
+normalize <- function(x) {
+  return ((x - min(x)) / (max(x) - min(x)))
+}
+nums <- unlist(lapply(clamp_model, is.numeric))
+clamp_num_nn <- clamp_model[ , nums]
+normalized <- clamp_num_nn
+normalized <- as.data.frame(lapply(normalized, normalize))
+#names(mmnums)
+
+clamp_fac_nn <- clamp_model
+clamp_fac_nn[, names(clamp_num_nn)] <- list(NULL)
+maxmindf <- data.frame(clamp_fac_nn, normalized)
+str(maxmindf)
+
+mmtrain <- sample.split(Y = maxmindf$MalwareDetection, SplitRatio = 0.7)
+mmtrainset <- subset(maxmindf, mmtrain == T)
+mmtestset <- subset(maxmindf, mmtrain == F)
+```
+
+Training neural network model
+```{r}
+nn_model <- nnet(MalwareDetection ~ ., data=mmtrainset, size=22, maxit=50, decay=1.0e-5, MaxNWts=15000)
+
+nn_predicted <- predict(nn_model, newdata=mmtestset, type="class")
+confusionMatrix(as.factor(nn_predicted), mmtestset$MalwareDetection)
+```
+
+Train test split
+```{r}
+train <- sample.split(Y = clamp_model$MalwareDetection, SplitRatio = 0.7)
+trainset <- subset(clamp_model, train == T)
+testset <- subset(clamp_model, train == F)
+```
+
+Grid search algorithm and K-fold Cross Validation
+```{r}
+grid_default <- expand.grid(n.trees = 200,
+                            interaction.depth = 1,
+                            shrinkage = 0.1,
+                            n.minobsinnode = 10)
+
+folds=10
+cvIndex <- createFolds(factor(trainset$MalwareDetection), folds, returnTrain = T) #stratified k fold
+train_control_log <- trainControl(
+  index = cvIndex,
+  number = folds,
+  method = "cv",
+)
+```
+
+Logistic Regression
+```{r}
+logistic <- train(MalwareDetection~., data=trainset, trControl = train_control_log, method = "glm", family=binomial)
+
+logreg_probs <- predict(logistic, newdata = testset, type = 'prob')
+threshold <- 0.5
+logreg_predicted <- data.table(ifelse(logreg_probs > 0.5, 1, 0))
+confusionMatrix(as.factor(logreg_predicted$`1`), testset$MalwareDetection)
+```
+Checking for multicollinearity 
+```{r}
+# logistic_check <- glm(MalwareDetection ~., data = trainset, family = binomial)
+# car::vif(logistic_check)
+# It returns an error: there are aliased coefficients in the model
+# This means that we have ran into perfect multicollinearity.
+# The column involved is "NumberOfRvaAndSizes" which is removed in feature selection process.
+```
+
+Random Forest
+```{r}
+randomForest_model <- randomForest(
+  MalwareDetection ~ .,
+  data=trainset,
+  tuneGrid = grid_default,
+  trControl = train_control
+)
+
+rf_predicted <- predict(randomForest_model, newdata = testset)
+confusionMatrix(rf_predicted, testset$MalwareDetection)
+```
+
+Applying Feature Selection using Boruta
+```{r}
+boruta <- Boruta(MalwareDetection ~ ., data = clamp_model, doTrace = 2, maxRuns=11)
+#print(boruta)
+plot(boruta, las = 2, cex.axis = 0.7)
+#plotImpHistory(boruta)
+
+bor <- TentativeRoughFix(boruta)
+#print(bor)
+attStats(bor)
+#getSelectedAttributes(bor, withTentative = F)
+selected_features <- getSelectedAttributes(bor, withTentative = F) 
+
+clamp_selected <- clamp_model[, selected_features]
+clamp_selected$MalwareDetection <- clamp_model$MalwareDetection
+```
+
+Normalising numerical data
+```{r}
+normalize <- function(x) {
+  return ((x - min(x)) / (max(x) - min(x)))
+}
+nums <- unlist(lapply(clamp_selected, is.numeric))
+clamp_num_nn_s <- clamp_selected[ , nums]
+normalized <- clamp_num_nn_s
+normalized <- as.data.frame(lapply(normalized, normalize))
+#names(mmnums)
+
+clamp_fac_nn_s <- clamp_selected
+clamp_fac_nn_s[, names(clamp_num_nn_s)] <- list(NULL)
+maxmindf_s <- data.frame(clamp_fac_nn_s, normalized)
+str(maxmindf_s)
+
+#maxmindf <- maxmindf %>% group_by(HasDetections) %>% sample_frac(.7)
+#maxmindf <- one_hot(as.data.table(maxmindf))
+
+
+mmtrain_s <- sample.split(Y = maxmindf_s$MalwareDetection, SplitRatio = 0.7)
+mmtrainset_s <- subset(maxmindf_s, mmtrain == T)
+mmtestset_s <- subset(maxmindf_s, mmtrain == F)
+```
+
+Training neural network
+```{r}
+start.time <- Sys.time()
+nn_model_s <- nnet(MalwareDetection ~ ., data=mmtrainset_s, size=22, maxit=50, decay=1.0e-5, MaxNWts=15000)
+
+nn_predicted_s <- predict(nn_model_s, newdata=mmtestset_s, type="class")
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+confusionMatrix(as.factor(nn_predicted_s), mmtestset_s$MalwareDetection)
+
+
+```
+
+Neural Network Graph
+```{r}
+hiddenNodes <- c(1:30)
+accuracy <- c()
+
+for (i in c(1:30)) {
+  nn_model <- nnet(MalwareDetection ~ ., data=mmtrainset, size=i, maxit=50, decay=1.0e-5, MaxNWts=15000)
+  nn_predicted <- predict(nn_model, newdata=mmtestset, type="class")
+  cm <- confusionMatrix(as.factor(nn_predicted), mmtestset$MalwareDetection)
+  overall <- cm$overall['Accuracy']
+  accuracy[i] <- overall
+}
+
+accuracy
+
+plot(hiddenNodes, accuracy, ylab="Model Accuracy", xlab="Number of Hidden Nodes")
+lines(hiddenNodes, accuracy)
+
+data <- data.frame(hiddenNodes, accuracy)
+names(data) <- c("Number of Hidden Nodes", "Model Accuracy")
+
+f <- list(
+  family = "Courier New, monospace",
+  size = 18,
+  color = "#7f7f7f"
+)
+x <- list(
+  title = "Number of Hidden Nodes",
+  titlefont = f
+)
+y <- list(
+  title = "Model Accuracy",
+  titlefont = f
+)
+fig <- plot_ly(data, x = ~hiddenNodes, y = ~accuracy, type = 'scatter', mode = 'lines')
+fig <- fig %>% layout(xaxis = x, yaxis = y)
+fig
+```
+
+Train Test Split
+```{r}
+train_s <- sample.split(Y = clamp_selected$MalwareDetection, SplitRatio = 0.7)
+trainset_s <- subset(clamp_selected, train == T)
+testset_s <- subset(clamp_selected, train == F)
+```
+
+Logistic Regression
+```{r}
+start.time <- Sys.time()
+logistic_selected <- train(MalwareDetection~., data=trainset_s, trControl = train_control_log, method = "glm", family=binomial)
+
+logreg_probs_s <- predict(logistic_selected, newdata = testset_s, type = 'prob')
+threshold <- 0.5
+logreg_predicted_s <- data.table(ifelse(logreg_probs_s > 0.5, 1, 0))
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+confusionMatrix(as.factor(logreg_predicted_s$`1`), testset_s$MalwareDetection)
+
+```
+
+```{r}
+start.time <- Sys.time()
+randomForest_model_s <- randomForest(
+  MalwareDetection ~ .,
+  data=trainset_s,
+  tuneGrid = grid_default,
+  trControl = train_control
+)
+
+rf_predicted_s <- predict(randomForest_model_s, newdata = testset_s)
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+confusionMatrix(rf_predicted_s, testset_s$MalwareDetection)
+
+csvMatrix <- confusionMatrix(rf_predicted_s, testset_s$MalwareDetection)
+tocsv <- data.frame(cbind(t(csvMatrix$overall)))
+write.csv(tocsv,file="csvMatrix.csv")
+```
