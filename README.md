@@ -1,6 +1,6 @@
 # Safe-T:
 
-Analysed malware classifier datasets to advise EV companies for reducing malfunction rates within their EVs using R. 
+Analysed malware classifier datasets to advise electric vehicle (EV) companies for reducing malfunction rates within their EVs. 
 
 # Overview:
 
