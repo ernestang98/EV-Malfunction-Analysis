@@ -6,7 +6,7 @@ Analysed malware classifier datasets to advise electric vehicle (EV) companies f
 
 1. Data cleaning 
 
-2. SMOTE analysis to identify the minority classes in to randomly oversample
+2. SMOTE analysis to identify the minority classes in order to randomly oversample
  
 3. Association rule mining was then used to determine relationships between co-occurring variables. 
 
